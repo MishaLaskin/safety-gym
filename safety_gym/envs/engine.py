@@ -12,7 +12,7 @@ from mujoco_py import MjViewer, MujocoException, const, MjRenderContextOffscreen
 from safety_gym.envs.world import World, Robot
 
 import sys
-
+import seaborn as sns
 
 # Distinct colors for different types of objects.
 # For now this is mostly used for visualization.
@@ -27,7 +27,32 @@ COLOR_WALL = np.array([.5, .5, .5, 1])
 COLOR_GREMLIN = np.array([0.5, 0, 1, 1])
 COLOR_CIRCLE = np.array([0, 1, 0, 1])
 COLOR_RED = np.array([1, 0, 0, 1])
+RANDOMIZE_COLOR = True
+COUNTER = 0
 
+if RANDOMIZE_COLOR:
+    def make_pi():
+        q, r, t, k, m, x = 1, 0, 1, 1, 3, 3
+        for j in range(1000):
+            if 4 * q + r - t < m * t:
+                yield m
+                q, r, t, k, m, x = 10*q, 10 * \
+                    (r-m*t), t, k, (10*(3*q+r))//t - 10*m, x
+            else:
+                q, r, t, k, m, x = q*k, (2*q+r)*x, t*x, k + \
+                    1, (q*(7*k+2)+r*x)//(t*x), x+2
+
+
+    random_color_idxs = []
+    pillar_idxs = np.arange(10)
+    for i in make_pi():
+        random_color_idxs.append(i)
+    palette = sns.color_palette("hls", 10)
+    COLOR_PALETTE = []
+    for color in palette:
+        color = list(color)
+        color.append(1)
+        COLOR_PALETTE.append(np.array(color))
 # Groups are a mujoco-specific mechanism for selecting which geom objects to "see"
 # We use these for raycasting lidar, where there are different lidar types.
 # These work by turning "on" the group to see and "off" all the other groups.
@@ -315,6 +340,7 @@ class Engine(gym.Env, gym.utils.EzPickle):
 
         self.seed(self._seed)
         self.done = True
+        self.counter = 0
 
     def parse(self, config):
         ''' Parse a config dict - see self.DEFAULT for description '''
@@ -550,14 +576,18 @@ class Engine(gym.Env, gym.utils.EzPickle):
         ''' Set internal random state seeds '''
         self._seed = np.random.randint(2**32) if seed is None else seed
 
-    def build_layout(self):
+    def build_layout(self,only_robot=False):
         ''' Rejection sample a placement of objects to find a layout. '''
         if not self.randomize_layout:
             self.rs = np.random.RandomState(0)
 
         for _ in range(10000):
-            if self.sample_layout():
-                break
+            if only_robot:
+                if self.sample_robot_pos():
+                    break
+            else:
+                if self.sample_layout():
+                    break
         else:
             raise ResamplingError('Failed to sample layout of objects')
 
@@ -568,8 +598,9 @@ class Engine(gym.Env, gym.utils.EzPickle):
             for other_name, other_xy in layout.items():
                 other_keepout = self.placements[other_name][1]
                 dist = np.sqrt(np.sum(np.square(xy - other_xy)))
-                if dist < other_keepout + self.placements_margin + keepout:
-                    return False
+                if 'hazard' not in other_name:
+                    if dist < other_keepout + self.placements_margin + keepout:
+                        return False
             return True
 
         layout = {}
@@ -584,6 +615,31 @@ class Engine(gym.Env, gym.utils.EzPickle):
                 return False
             layout[name] = xy
         self.layout = layout
+        return True
+
+    def sample_robot_pos(self):
+        ''' Sample a robot pos, returning True if successful, else False. '''
+
+        def placement_is_valid(xy, layout):
+            for other_name, other_xy in layout.items():
+                other_keepout = self.placements[other_name][1]
+                dist = np.sqrt(np.sum(np.square(xy - other_xy)))
+                if dist < other_keepout + self.placements_margin + keepout:
+                    return False
+            return True
+
+        name = 'robot'
+        placements,keepout = self.placements[name]
+        
+        conflicted = True
+        for _ in range(100):
+            xy = self.draw_placement(placements, keepout)
+            if placement_is_valid(xy, self.layout):
+                conflicted = False
+                break
+        if conflicted:
+            return False
+        self.layout[name] = xy
         return True
 
     def constrain_placement(self, placement, keepout):
@@ -711,6 +767,10 @@ class Engine(gym.Env, gym.utils.EzPickle):
         if self.hazards_num:
             for i in range(self.hazards_num):
                 name = f'hazard{i}'
+                random_color = COLOR_PALETTE[self.counter*2 % 10]
+                self.counter += 1
+                hazard_color = (
+                    COLOR_HAZARD if not RANDOMIZE_COLOR else random_color)
                 geom = {'name': name,
                         'size': [self.hazards_size, 1e-2],#self.hazards_size / 2],
                         'pos': np.r_[self.layout[name], 2e-2],#self.hazards_size / 2 + 1e-2],
@@ -719,10 +779,12 @@ class Engine(gym.Env, gym.utils.EzPickle):
                         'contype': 0,
                         'conaffinity': 0,
                         'group': GROUP_HAZARD,
-                        'rgba': COLOR_HAZARD * [1, 1, 1, 0.25]} #0.1]}  # transparent
+                        'rgba': hazard_color * [1, 1, 1, 0.25]}  # 0.1]}  # transparent
                 world_config['geoms'][name] = geom
         if self.pillars_num:
             for i in range(self.pillars_num):
+                random_color = COLOR_PALETTE[self.counter % 10]
+                self.counter+=1
                 name = f'pillar{i}'
                 geom = {'name': name,
                         'size': [self.pillars_size, self.pillars_height],
@@ -730,10 +792,12 @@ class Engine(gym.Env, gym.utils.EzPickle):
                         'rot': self.random_rot(),
                         'type': 'cylinder',
                         'group': GROUP_PILLAR,
-                        'rgba': COLOR_PILLAR}
+                        'rgba': COLOR_PILLAR if not RANDOMIZE_COLOR else random_color}
                 world_config['geoms'][name] = geom
         if self.walls_num:
             for i in range(self.walls_num):
+                random_color = COLOR_PALETTE[random_color_idxs[self.counter]]
+                self.counter += 1
                 name = f'wall{i}'
                 geom = {'name': name,
                         'size': np.ones(3) * self.walls_size,
@@ -741,7 +805,7 @@ class Engine(gym.Env, gym.utils.EzPickle):
                         'rot': 0,
                         'type': 'box',
                         'group': GROUP_WALL,
-                        'rgba': COLOR_WALL}
+                        'rgba': COLOR_WALL }#if not RANDOMIZE_COLOR else random_color}
                 world_config['geoms'][name] = geom
         if self.buttons_num:
             for i in range(self.buttons_num):
@@ -843,10 +907,10 @@ class Engine(gym.Env, gym.utils.EzPickle):
         ''' Pick a new goal button, maybe with resampling due to hazards '''
         self.goal_button = self.rs.choice(self.buttons_num)
 
-    def build(self):
+    def build(self,only_robot=False):
         ''' Build a new physics simulation environment '''
         # Sample object positions
-        self.build_layout()
+        self.build_layout(only_robot=only_robot)
 
         # Build the underlying physics world
         self.world_config_dict = self.build_world_config()
@@ -859,7 +923,8 @@ class Engine(gym.Env, gym.utils.EzPickle):
             self.world.reset(build=False)
             self.world.rebuild(self.world_config_dict, state=False)
         # Redo a small amount of work, and setup initial goal state
-        self.build_goal()
+        if not only_robot:
+            self.build_goal()
 
         # Save last action
         self.last_action = np.zeros(self.action_space.shape)
@@ -867,8 +932,9 @@ class Engine(gym.Env, gym.utils.EzPickle):
         # Save last subtree center of mass
         self.last_subtreecom = self.world.get_sensor('subtreecom')
 
-    def reset(self):
+    def reset(self,only_robot=False):
         ''' Reset the physics simulation and return observation '''
+        self.counter = 0
         self._seed += 1  # Increment seed
         self.rs = np.random.RandomState(self._seed)
         self.done = False
@@ -876,8 +942,9 @@ class Engine(gym.Env, gym.utils.EzPickle):
         # Set the button timer to zero (so button is immediately visible)
         self.buttons_timer = 0
 
-        self.clear()
-        self.build()
+        if not only_robot:
+            self.clear()
+        self.build(only_robot=only_robot)
         # Save the layout at reset
         self.reset_layout = deepcopy(self.layout)
 
@@ -1237,7 +1304,7 @@ class Engine(gym.Env, gym.utils.EzPickle):
     def step(self, action):
         ''' Take a step and return observation, reward, done, and info '''
         action = np.array(action, copy=False)  # Cast to ndarray
-        assert not self.done, 'Environment must be reset before stepping'
+        #assert not self.done, 'Environment must be reset before stepping'
 
         info = {}
 
