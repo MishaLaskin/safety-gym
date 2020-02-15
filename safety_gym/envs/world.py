@@ -139,16 +139,22 @@ class World:
             # indigo: "0.293 0 0.508"
             asset = xmltodict.parse('''
                 <asset>
-                    <texture type="skybox" builtin="gradient" rgb1="0.527 0.582 0.906" rgb2="0.1 0.1 0.35"
-                        width="800" height="800" markrgb="1 1 1" mark="random" random="0.001"/>
-                    <texture name="texplane" builtin="checker" height="100" width="100"
-                        rgb1="0.7 0.7 0.7" rgb2="0.8 0.8 0.8" type="2d"/>
+                    <texture type="skybox" gridsize="3 4" gridlayout=".U..LFRB.D.." file="/home/misha/downloads/rllab/imgs/dreamworld2.png"/>
+                    <texture type="2d" name="floor" file="/home/misha/downloads/rllab/imgs/floortexture.png"/>
+                    
                     <material name="MatPlane" reflectance="0.1" shininess="0.1" specular="0.1"
-                        texrepeat="10 10" texture="texplane"/>
+                        texrepeat="1 1" texture="floor"/>
                 </asset>
                 ''')
             self.xml['mujoco']['asset'] = asset['asset']
-
+            """
+            <texture type="skybox" builtin="gradient" rgb1="0.527 0.582 0.906" rgb2="0.1 0.1 0.35"
+                        width="800" height="800" markrgb="1 1 1" mark="random" random="0.001"/>
+            <texture name="texplane" builtin="checker" height="100" width="100"
+                        rgb1="0.7 0.7 0.7" rgb2="0.8 0.8 0.8" type="2d"/>
+            <material name="MatPlane" reflectance="0.1" shininess="0.1" specular="0.1"
+                        texrepeat="10 10" texture="floor"/>
+            """
 
         # Add light to the XML dictionary
         light = xmltodict.parse('''<b>
@@ -173,6 +179,7 @@ class World:
         cameras = xmltodict.parse('''<b>
             <camera name="fixednear" pos="0 -2 2" zaxis="0 -1 1"/>
             <camera name="fixedfar" pos="0 -5 5" zaxis="0 -1 1"/>
+            <camera name="fixedtopview" pos="0 0 9" zaxis="0 0 1"/>
             </b>''')
         worldbody['camera'] = cameras['b']['camera']
 

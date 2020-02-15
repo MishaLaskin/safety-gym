@@ -596,11 +596,12 @@ class Engine(gym.Env, gym.utils.EzPickle):
 
         def placement_is_valid(xy, layout):
             for other_name, other_xy in layout.items():
+                if 'goal' in other_name:
+                    continue
                 other_keepout = self.placements[other_name][1]
                 dist = np.sqrt(np.sum(np.square(xy - other_xy)))
-                if 'hazard' not in other_name:
-                    if dist < other_keepout + self.placements_margin + keepout:
-                        return False
+                if dist < other_keepout + self.placements_margin + keepout:
+                    return False
             return True
 
         layout = {}
@@ -622,6 +623,9 @@ class Engine(gym.Env, gym.utils.EzPickle):
 
         def placement_is_valid(xy, layout):
             for other_name, other_xy in layout.items():
+                # allow resets on hazards and goals
+                if 'goal' in other_name or 'hazard' in other_name:
+                    continue
                 other_keepout = self.placements[other_name][1]
                 dist = np.sqrt(np.sum(np.square(xy - other_xy)))
                 if dist < other_keepout + self.placements_margin + keepout:
@@ -647,7 +651,7 @@ class Engine(gym.Env, gym.utils.EzPickle):
         xmin, ymin, xmax, ymax = placement
         return (xmin + keepout, ymin + keepout, xmax - keepout, ymax - keepout)
 
-    def draw_placement(self, placements, keepout):
+    def draw_placement(self, placements, keepout,robot_xy=None,threshold=0.2):
         ''' 
         Sample an (x,y) location, based on potential placement areas.
 
@@ -686,7 +690,10 @@ class Engine(gym.Env, gym.utils.EzPickle):
                 probs = np.array(areas) / np.sum(areas)
                 choice = constrained[self.rs.choice(len(constrained), p=probs)]
         xmin, ymin, xmax, ymax = choice
-        return np.array([self.rs.uniform(xmin, xmax), self.rs.uniform(ymin, ymax)])
+        if robot_xy is None:
+            return np.array([self.rs.uniform(xmin, xmax), self.rs.uniform(ymin, ymax)])
+        goal_xy = robot_xy + np.array([self.rs.uniform(-threshold, threshold), self.rs.uniform(-threshold, threshold)])
+        return goal_xy
 
     def random_rot(self):
         ''' Use internal random state to get a random rotation in radians '''
@@ -852,10 +859,10 @@ class Engine(gym.Env, gym.utils.EzPickle):
         ''' Reset internal state for building '''
         self.layout = None
 
-    def build_goal(self):
+    def build_goal(self,robot_xy=None):
         ''' Build a new goal position, maybe with resampling due to hazards '''
         if self.task == 'goal':
-            self.build_goal_position()
+            self.build_goal_position(robot_xy=robot_xy,threshold=0.5)
             self.last_dist_goal = self.dist_goal()
         elif self.task == 'push':
             self.build_goal_position()
@@ -873,25 +880,36 @@ class Engine(gym.Env, gym.utils.EzPickle):
         else:
             raise ValueError(f'Invalid task {self.task}')
 
-    def sample_goal_position(self):
+    def sample_goal_position(self,robot_xy=None,threshold=0.5):
         ''' Sample a new goal position and return True, else False if sample rejected '''
-        placements, keepout = self.placements['goal']
-        goal_xy = self.draw_placement(placements, keepout)
+        if 'goal' in self.placements:
+            placements, keepout = self.placements['goal']
+        else:
+            placements, keepout = None, 0.4
+      
+        goal_xy = self.draw_placement(placements, keepout,robot_xy=robot_xy,threshold=threshold)
+        if robot_xy is not None:
+            self.layout['goal'] = goal_xy
+            return True
         for other_name, other_xy in self.layout.items():
             other_keepout = self.placements[other_name][1]
             dist = np.sqrt(np.sum(np.square(goal_xy - other_xy)))
             if dist < other_keepout + self.placements_margin + keepout:
+                #print('goal conflicts with',other_name)
+                #print('goal_xy',goal_xy)
+                #print('other_xy',other_xy)
+                #print('dist',dist,'keepout margin',other_keepout + self.placements_margin + keepout)
                 return False
         self.layout['goal'] = goal_xy
         return True
 
-    def build_goal_position(self):
+    def build_goal_position(self,robot_xy=None,threshold=0.5):
         ''' Build a new goal position, maybe with resampling due to hazards '''
         # Resample until goal is compatible with layout
         if 'goal' in self.layout:
             del self.layout['goal']
         for _ in range(10000):  # Retries
-            if self.sample_goal_position():
+            if self.sample_goal_position(robot_xy=robot_xy,threshold=threshold):
                 break
         else:
             raise ResamplingError('Failed to generate goal')
@@ -949,7 +967,7 @@ class Engine(gym.Env, gym.utils.EzPickle):
         self.reset_layout = deepcopy(self.layout)
 
         cost = self.cost()
-        assert cost['cost'] == 0, f'World has starting cost! {cost}'
+        #assert cost['cost'] == 0, f'World has starting cost! {cost}'
 
         # Reset stateful parts of the environment
         self.first_reset = False  # Built our first world successfully
