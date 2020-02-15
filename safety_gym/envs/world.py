@@ -139,8 +139,8 @@ class World:
             # indigo: "0.293 0 0.508"
             asset = xmltodict.parse('''
                 <asset>
-                    <texture type="skybox" gridsize="3 4" gridlayout=".U..LFRB.D.." file="/home/misha/downloads/rllab/imgs/dreamworld2.png"/>
-                    <texture type="2d" name="floor" file="/home/misha/downloads/rllab/imgs/floortexture.png"/>
+                    <texture type="skybox" gridsize="3 4" gridlayout=".U..LFRB.D.." file="/home/misha/downloads/envs/safety_gym/textures/dreamworld2.png"/>
+                    <texture type="2d" name="floor" file="/home/misha/downloads/envs/safety_gym/textures/floortexture.png"/>
                     
                     <material name="MatPlane" reflectance="0.1" shininess="0.1" specular="0.1"
                         texrepeat="1 1" texture="floor"/>
